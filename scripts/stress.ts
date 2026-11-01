@@ -9,7 +9,15 @@
  * spots that remain, so regressions are caught from both directions.
  */
 import assert from "node:assert/strict";
-import { interpret, type RNode, type Screen } from "../src/utils/swift/index.ts";
+import {
+  frameClasses,
+  frameLayout,
+  hasFrameSizing,
+  interpret,
+  spacerClasses,
+  type RNode,
+  type Screen,
+} from "../src/utils/swift/index.ts";
 
 let passed = 0;
 let failed = 0;
@@ -891,6 +899,96 @@ const ALERT_MESSAGE = `struct ContentView: View {
       false,
       "message must not leak into the page tree",
     );
+  });
+}
+
+/* ══════════════════════ Suite 9 — frame infinity → w-full mapping ══════════════════════ */
+
+console.log("suite 9 — frame infinity maps to w-full");
+
+const FORM_LAYOUT = `struct ContentView: View {
+    @State private var name = ""
+
+    var body: some View {
+        VStack(spacing: 12) {
+            TextField("Nama", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: .infinity)
+
+            Button("Simpan") { }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+
+            HStack {
+                TextField("Cari", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: .infinity)
+                Button("Go") { }
+            }
+
+            Button { } label: {
+                HStack {
+                    Text("Kirim")
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding()
+    }
+}`;
+
+{
+  const { screen } = build(FORM_LAYOUT);
+  const field = byType(screen.node, "TextField")[0];
+  const button = byType(screen.node, "Button")[0];
+  const row = byType(screen.node, "HStack")[0];
+  const rowField = byType(row, "TextField")[0];
+
+  check("frame(maxWidth: .infinity) records the fill-x intent", () => {
+    const layout = frameLayout(field?.modifiers ?? []);
+    assert.ok(layout, "frame layout exists");
+    assert.equal(layout.fillX, true);
+    assert.equal(layout.fillY, false);
+    assert.equal(layout.growX, true);
+    assert.equal(hasFrameSizing(layout), true);
+  });
+
+  check("frame(maxWidth: .infinity) maps to w-full in a column", () => {
+    const layout = frameLayout(button?.modifiers ?? [])!;
+    const classes = frameClasses(layout, "vertical");
+    assert.ok(classes.includes("w-full"), `classes were ${classes.join(" ")}`);
+    assert.ok(classes.includes("self-stretch"));
+    assert.equal(classes.includes("h-full"), false);
+  });
+
+  check("frame(maxWidth: .infinity) flexes like a Spacer in a row", () => {
+    const layout = frameLayout(rowField?.modifiers ?? [])!;
+    const classes = frameClasses(layout, "horizontal");
+    assert.ok(classes.includes("w-full"));
+    assert.ok(classes.includes("flex-1"));
+    assert.ok(classes.includes("basis-0"));
+    assert.ok(classes.includes("min-w-0"));
+  });
+
+  check("frame without sizing stays a pure alignment frame", () => {
+    const { screen: noSizing } = build(`struct ContentView: View {
+      var body: some View { Text("x").frame(alignment: .leading) }
+    }`);
+    const layout = frameLayout(noSizing.node.modifiers)!;
+    assert.equal(hasFrameSizing(layout), false);
+    assert.deepEqual(frameClasses(layout, "none"), []);
+  });
+
+  check("Spacer keeps a flexible mapping on both axes", () => {
+    assert.ok(spacerClasses("horizontal").includes("flex-1"));
+    assert.ok(spacerClasses("horizontal").includes("basis-0"));
+    assert.ok(spacerClasses("vertical").includes("min-h-[1px]"));
+  });
+
+  check("Spacer inside a Button label survives as a spacer node", () => {
+    const labelSpacer = findAll(screen.node, (n) => n.type === "Spacer");
+    assert.ok(labelSpacer.length >= 1, "spacer node exists in the label");
   });
 }
 

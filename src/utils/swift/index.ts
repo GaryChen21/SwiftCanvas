@@ -44,4 +44,17 @@ export {
   type ExternalSymbolProvider,
 } from "./design.ts";
 
+export {
+  dimensionOf,
+  frameClasses,
+  frameLayout,
+  hasFrameSizing,
+  implicitMemberName,
+  spacerClasses,
+  stretchesToFrame,
+  type Dimension,
+  type FrameLayout,
+  type LayoutAxis,
+} from "./layout.ts";
+
 export type { Program, StructDecl, ViewItem, ViewExpr, Stmt, Expr } from "./ast.ts";

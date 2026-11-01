@@ -8,6 +8,12 @@ evaluator → view builder) mengeksekusi kode Anda dan renderer React menggambar
 hasilnya. Preview-nya interaktif: `@State`, `Button`, `ForEach`, navigasi,
 `.sheet`, dan `.alert` benar-benar bekerja.
 
+`.frame(maxWidth: .infinity)` dipetakan ke `w-full` (dan `flex-1 basis-0` di
+dalam `HStack`, seperti `Spacer()`), sehingga `Button` dan `TextField` melebar
+penuh alih-alih menyusut mengikuti isinya. Parser menurunkan niat layout ini di
+`src/utils/swift/layout.ts`; renderer memakai kelas Tailwind-nya sekaligus
+inline style sebagai cadangan.
+
 ## Cara Menjalankan
 
 Butuh **Node.js 22+** (dan Git).
@@ -29,8 +35,8 @@ Verifikasi dan build produksi:
 
 ```bash
 npm run typecheck      # cek tipe TypeScript
-npm test               # 40 tes regresi interpreter
-npm run test:stress    # 42 tes stres SwiftUI (grid, GeometryReader, Path, Button)
+npm test               # 44 tes regresi interpreter
+npm run test:stress    # 48 tes stres SwiftUI (grid, GeometryReader, Path, Button)
 npm run build          # build produksi (typecheck + vite)
 ```
 

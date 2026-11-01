@@ -621,5 +621,29 @@ check("html escaping prevents markup injection", () => {
   assert.match(html, /&lt;img/);
 });
 
+check("frame(maxWidth: .infinity) maps to w-full", () => {
+  const { html } = transpileSwift('Text("x").frame(maxWidth: .infinity)');
+  assert.match(html, /w-full/);
+  assert.match(html, /width:100%/);
+});
+
+check("Button(.frame(maxWidth: .infinity)) becomes full width", () => {
+  const { html } = transpileSwift('Button("Tap Me") { }.frame(maxWidth: .infinity)');
+  assert.match(html, /<button[^>]*class="[^"]*\bw-full\b/);
+  assert.match(html, /style="[^"]*width:100%/);
+});
+
+check("frame(maxHeight: .infinity) maps to h-full", () => {
+  const { html } = transpileSwift('VStack { }.frame(maxHeight: .infinity)');
+  assert.match(html, /\bh-full\b/);
+  assert.match(html, /height:100%/);
+});
+
+check("fixed frame numbers stay inline styles without fill classes", () => {
+  const { html } = transpileSwift('Text("x").frame(width: 120, height: 40)');
+  assert.match(html, /width:120px/);
+  assert.equal(/\bw-full\b/.test(html), false);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exitCode = 1;

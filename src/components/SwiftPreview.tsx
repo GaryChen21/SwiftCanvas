@@ -2,6 +2,16 @@ import React from "react";
 import type { PreviewRuntime, RModifier, RNode, Screen, ModalSpec } from "../utils/swift/viewBuilder";
 import { numOf, truthy, type Value } from "../utils/swift/evaluator";
 import {
+  frameClasses,
+  frameLayout,
+  fullWidthClasses,
+  hasFrameSizing,
+  implicitMemberName as isImplicitName,
+  spacerClasses,
+  stretchesToFrame,
+  viewWantsFullWidth,
+} from "../utils/swift/layout";
+import {
   FONT_STACK,
   METRICS,
   cssColor,
@@ -176,16 +186,6 @@ function resolveEnv(node: RNode, parent: ViewEnv): ViewEnv {
   return env;
 }
 
-function isImplicitName(value: Value | undefined): string | null {
-  if (!value || typeof value !== "object") return null;
-  if ((value as { t?: string }).t === "implicit") {
-    const path = (value as { path: string[] }).path;
-    return path[path.length - 1] ?? null;
-  }
-  if (typeof value === "string") return value;
-  return null;
-}
-
 interface FrameSpec {
   width?: number | string;
   minWidth?: number | string;
@@ -208,19 +208,6 @@ const ALIGNMENTS: Record<string, { align: FrameSpec["align"]; justify: FrameSpec
   bottomLeading: { align: "flex-end", justify: "flex-start" },
   bottomTrailing: { align: "flex-end", justify: "flex-end" },
 };
-
-/** Numeric dimension, or the `.infinity` sentinel for "fill available space". */
-type Dimension = number | string | "infinity";
-
-function dimension(value: Value | undefined): Dimension | undefined {
-  if (typeof value === "number") return value;
-  const numeric = numOf(value ?? null);
-  if (numeric !== undefined) return numeric;
-  const name = isImplicitName(value);
-  if (name === "infinity") return "infinity";
-  if (name === "zero") return 0;
-  return undefined;
-}
 
 /**
  * Merge a style patch into one rendered element.
@@ -337,12 +324,7 @@ function isGreedyVertical(child: RNode): boolean {
   }
   const frame = child.modifiers.find((m) => m.name === "frame");
   if (!frame) return false;
-  for (const label of ["height", "maxHeight", "minHeight"]) {
-    if (isImplicitName(frame.args.find((a) => a.label === label)?.value) === "infinity") {
-      return true;
-    }
-  }
-  return false;
+  return frameLayout([frame])?.fillY === true;
 }
 
 /**
@@ -598,7 +580,7 @@ function applyStructuralModifier(
       return <PaddingWrapper content={content} mod={mod} />;
 
     case "frame":
-      return <FrameWrapper content={content} mod={mod} env={env} />;
+      return <FrameWrapper content={content} mod={mod} env={env} node={node} />;
 
     case "background":
       return <BackgroundWrapper content={content} mod={mod} env={env} />;
@@ -875,67 +857,67 @@ const PaddingWrapper: React.FC<{ content: React.ReactNode; mod: RModifier }> = (
  * the view and re-align the content inside it. `.infinity` cannot be mapped to
  * a blind `100%`: along a row axis it means "grow into the free space", along
  * a column axis it means "stretch across the parent".
+ *
+ * The frame's intent comes from the AST (`frameLayout`) and is mapped to
+ * Tailwind — `.frame(maxWidth: .infinity)` ⇒ `w-full`, inside an HStack it also
+ * becomes `flex-1 basis-0 min-w-0` like a Spacer — with matching inline styles,
+ * because the canvas must render even where Tailwind is not built. Controls and
+ * containers are additionally stretched to fill the frame, so a Button or
+ * TextField no longer shrink-wraps inside a full-width frame.
  */
-const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: ViewEnv }> = ({ content, mod, env }) => {
-  const get = (label: string) => dimension(mod.args.find((a) => a.label === label)?.value);
-  const positional = mod.args.filter((a) => !a.label).map((a) => a.value);
-  const width = get("width") ?? dimension(positional[0]);
-  const height = get("height") ?? dimension(positional[1]);
-  const minWidth = get("minWidth");
-  const maxWidth = get("maxWidth");
-  const minHeight = get("minHeight");
-  const maxHeight = get("maxHeight");
+const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: ViewEnv; node: RNode }> = ({ content, mod, env, node }) => {
+  const layout = frameLayout([mod]);
+  if (!layout || !hasFrameSizing(layout)) {
+    // A frame without any sizing only re-aligns its content inside the bounds
+    // the view already received; an extra box would change the parent layout.
+    return <>{content}</>;
+  }
+
   const alignment = ALIGNMENTS[isImplicitName(mod.args.find((a) => a.label === "alignment")?.value) ?? "center"] ?? ALIGNMENTS.center;
 
-  // A frame without any sizing only re-aligns its content inside the bounds
-  // the view already received; an extra box would change the parent layout.
-  const hasSizing =
-    width !== undefined || height !== undefined ||
-    minWidth !== undefined || maxWidth !== undefined ||
-    minHeight !== undefined || maxHeight !== undefined;
-  if (!hasSizing) return <>{content}</>;
+  // Text, labels and shapes keep their intrinsic box (SwiftUI centers them in
+  // the wider frame); controls and containers stretch to fill it.
+  const stretch = stretchesToFrame(node.type);
+  const stretchX = stretch && layout.fillX;
+  const stretchY = stretch && layout.fillY;
 
   const style: React.CSSProperties = {
     display: "flex",
+    // A column wrapper stretches its child across the cross axis: that is how a
+    // Button/TextField fills the width without a style hack of its own.
+    flexDirection: stretchX ? "column" : "row",
     position: "relative",
-    alignItems: alignment.align,
-    justifyContent: alignment.justify,
+    alignItems: stretchX || stretchY ? "stretch" : alignment.align,
+    justifyContent: stretchX ? alignment.align : alignment.justify,
     minWidth: 0,
     minHeight: 0,
+    boxSizing: "border-box",
   };
 
-  if (typeof width === "number") {
-    style.width = width;
+  if (typeof layout.width === "number") {
+    style.width = layout.width;
     // A fixed SwiftUI frame does not shrink when the parent runs out of room.
     style.flexShrink = 0;
-  } else if (width === "infinity") {
-    style.width = "100%";
   }
-  if (typeof height === "number") {
-    style.height = height;
+  if (typeof layout.height === "number") {
+    style.height = layout.height;
     style.flexShrink = 0;
-  } else if (height === "infinity") {
-    style.height = "100%";
   }
-
-  if (typeof minWidth === "number") style.minWidth = minWidth;
-  if (typeof maxWidth === "number") style.maxWidth = maxWidth;
-  if (typeof minHeight === "number") style.minHeight = minHeight;
-  if (typeof maxHeight === "number") style.maxHeight = maxHeight;
+  if (typeof layout.minWidth === "number") style.minWidth = layout.minWidth;
+  if (typeof layout.maxWidth === "number") style.maxWidth = layout.maxWidth;
+  if (typeof layout.minHeight === "number") style.minHeight = layout.minHeight;
+  if (typeof layout.maxHeight === "number") style.maxHeight = layout.maxHeight;
 
   // A frame with only a vertical size keeps the offered width — a shape or
   // GeometryReader inside must not collapse to its min-content width.
   const hasVerticalOnly =
-    width === undefined &&
-    (height !== undefined || minHeight !== undefined || maxHeight !== undefined);
+    layout.width === undefined &&
+    (layout.height !== undefined || layout.minHeight !== undefined || layout.maxHeight !== undefined);
   if (hasVerticalOnly && env.axis !== "horizontal") {
     style.width = style.width ?? "100%";
   }
 
-  const growX = minWidth === "infinity" || maxWidth === "infinity";
-  const growY = minHeight === "infinity" || maxHeight === "infinity";
-
-  if (growX) {
+  if (layout.fillX) {
     if (env.axis === "horizontal") {
       // Inside an HStack this behaves like a Spacer: consume the free width.
       style.flexGrow = 1;
@@ -944,10 +926,10 @@ const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: Vi
     } else {
       style.width = style.width ?? "100%";
       style.alignSelf = "stretch";
-      style.maxWidth = "100%";
+      style.maxWidth = style.maxWidth ?? "100%";
     }
   }
-  if (growY) {
+  if (layout.fillY) {
     if (env.axis === "vertical") {
       style.flexGrow = 1;
       style.flexBasis = 0;
@@ -955,11 +937,16 @@ const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: Vi
     } else {
       style.height = style.height ?? "100%";
       style.alignSelf = "stretch";
-      style.maxHeight = "100%";
+      style.maxHeight = style.maxHeight ?? "100%";
     }
   }
 
-  return <div style={style}>{content}</div>;
+  const classes = frameClasses(layout, env.axis);
+  return (
+    <div className={classes.length > 0 ? classes.join(" ") : undefined} style={style}>
+      {content}
+    </div>
+  );
 };
 
 const BackgroundWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: ViewEnv }> = ({ content, mod, env }) => {
@@ -1250,13 +1237,38 @@ const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
     if (action) action();
   };
 
+  // The label fills the button box, so once `.frame(maxWidth: .infinity)`
+  // stretches the button (or it sits in a greedy row), any Spacer inside the
+  // label has room to grow instead of collapsing to its minimum.
   const label = node.children.length > 0 ? (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>{renderChildren(node, env)}</span>
+    <span style={{ display: "flex", flex: "1 1 auto", minWidth: 0, alignItems: "center", justifyContent: "center", gap: 6 }}>
+      {renderChildren(node, env)}
+    </span>
   ) : (
     <span>{node.text ?? "Button"}</span>
   );
 
+  // A greedy label — `.frame(maxWidth: .infinity)` on the label's content, or a
+  // Spacer inside it — makes the button greedy too. That is the idiomatic
+  // SwiftUI recipe for a full-width button, so the button must claim the width
+  // instead of shrinking around the label.
+  const greedyLabel = node.children.some(viewWantsFullWidth);
+  const greedyClasses = greedyLabel ? fullWidthClasses(env.axis) : [];
+  const greedyStyle: React.CSSProperties = greedyLabel
+    ? env.axis === "horizontal"
+      ? { flexGrow: 1, flexBasis: 0, minWidth: 0, alignSelf: "stretch" }
+      : { width: "100%", alignSelf: "stretch", maxWidth: "100%" }
+    : {};
+  const buttonClass = (extra: string) =>
+    [extra, ...greedyClasses].filter(Boolean).join(" ");
+
   const textStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 0,
+    maxWidth: "100%",
+    ...greedyStyle,
     fontFamily: cssFontFamily(env.font),
     fontSize: env.font.size,
     fontWeight: env.font.weight,
@@ -1268,7 +1280,7 @@ const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
       <button
         type="button"
         onClick={handle}
-        className="cursor-pointer active:opacity-70"
+        className={buttonClass("cursor-pointer active:opacity-70")}
         style={{
           ...textStyle,
           color: role === "destructive" ? "#fff" : "#fff",
@@ -1288,7 +1300,7 @@ const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
       <button
         type="button"
         onClick={handle}
-        className="cursor-pointer active:opacity-60"
+        className={buttonClass("cursor-pointer active:opacity-60")}
         style={{
           ...textStyle,
           color: role === "destructive" ? "#FF3B30" : env.tint,
@@ -1305,7 +1317,7 @@ const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
 
   if (style === "plain") {
     return (
-      <button type="button" onClick={handle} className="cursor-pointer active:opacity-50" style={{ ...textStyle, color: env.color ?? "#000000", background: "transparent", border: "none", padding: 0 }}>
+      <button type="button" onClick={handle} className={buttonClass("cursor-pointer active:opacity-50")} style={{ ...textStyle, color: env.color ?? "#000000", background: "transparent", border: "none", padding: 0 }}>
         {label}
       </button>
     );
@@ -1316,7 +1328,7 @@ const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
     <button
       type="button"
       onClick={handle}
-      className="cursor-pointer active:opacity-50"
+      className={buttonClass("cursor-pointer active:opacity-50")}
       style={{
         ...textStyle,
         color: role === "destructive" ? "#FF3B30" : env.tint,
@@ -1410,14 +1422,11 @@ const StackBlock: React.FC<{ node: RNode; env: ViewEnv; direction: "column" | "r
   const spacingArg = node.args.find((a) => a.label === "spacing")?.value;
   const spacing = typeof spacingArg === "number" ? spacingArg : METRICS.defaultStackSpacing;
   const axis: ViewEnv["axis"] = direction === "column" ? "vertical" : "horizontal";
-  // A row that contains a Spacer, a greedy Color or a flexible-width control
-  // (TextField/Slider/…) consumes the offered width, exactly like SwiftUI's
-  // layout proposal. The same applies vertically to a column that contains a
-  // greedy child.
-  const FLEXIBLE_ROW_TYPES = new Set([
-    "Spacer", "Color", "TextField", "SecureField", "TextEditor", "Slider",
-  ]);
-  const greedyRow = direction === "row" && node.children.some((child) => FLEXIBLE_ROW_TYPES.has(child.type));
+  // A row containing a Spacer, a greedy Color, a flexible-width control or a
+  // child with `.frame(maxWidth: .infinity)` consumes the offered width, exactly
+  // like SwiftUI's layout proposal. The same applies vertically to a column
+  // that contains a greedy child.
+  const greedyRow = direction === "row" && node.children.some(viewWantsFullWidth);
   const greedyColumn = direction === "column" && node.children.some(isGreedyVertical);
 
   return (
@@ -1530,11 +1539,13 @@ const GeometryReaderBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, en
   );
 };
 
-const SpacerBlock: React.FC<{ env: ViewEnv }> = ({ env }) => {  const minLength = 8;
+const SpacerBlock: React.FC<{ env: ViewEnv }> = ({ env }) => {
+  const minLength = 8;
+  const className = spacerClasses(env.axis).join(" ");
   if (env.axis === "horizontal") {
-    return <div style={{ flexGrow: 1, flexBasis: 0, minWidth: minLength }} />;
+    return <div className={className} style={{ flexGrow: 1, flexBasis: 0, minWidth: minLength }} />;
   }
-  return <div style={{ flexGrow: 1, flexBasis: 0, minHeight: minLength }} />;
+  return <div className={className} style={{ flexGrow: 1, flexBasis: 0, minHeight: minLength }} />;
 };
 
 const DividerBlock: React.FC<{ env: ViewEnv }> = ({ env }) => {
@@ -2291,8 +2302,10 @@ const TextFieldBlock: React.FC<{ node: RNode; env: ViewEnv; secure: boolean }> =
   // SwiftUI's TextField is flexible-width: it fills a column and takes the
   // remaining space beside siblings in a row. `width:100%` inside a row would
   // starve those siblings (text wraps to two lines), so the row case uses a
-  // zero-basis grow instead.
+  // zero-basis grow instead — emitted both as Tailwind classes and as inline
+  // styles so the mapping is visible in the DOM and no Tailwind build is needed.
   const inRow = env.axis === "horizontal";
+  const className = inRow ? "flex-1 basis-0 min-w-0" : "w-full";
   const common: React.CSSProperties = {
     ...(inRow
       ? { flexGrow: 1, flexBasis: 0 }
@@ -2314,6 +2327,7 @@ const TextFieldBlock: React.FC<{ node: RNode; env: ViewEnv; secure: boolean }> =
   if (multiline) {
     return (
       <textarea
+        className={className}
         value={value}
         placeholder={placeholder}
         onChange={(event) => binding?.set(event.target.value)}
@@ -2325,6 +2339,7 @@ const TextFieldBlock: React.FC<{ node: RNode; env: ViewEnv; secure: boolean }> =
 
   return (
     <input
+      className={className}
       type={secure ? "password" : "text"}
       value={value}
       placeholder={placeholder}
@@ -2340,6 +2355,7 @@ const TextEditorBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env })
   const inRow = env.axis === "horizontal";
   return (
     <textarea
+      className={inRow ? "flex-1 basis-0 min-w-0" : "w-full"}
       value={value}
       onChange={(event) => binding?.set(event.target.value)}
       rows={5}

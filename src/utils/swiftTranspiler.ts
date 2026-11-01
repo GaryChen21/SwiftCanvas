@@ -448,6 +448,13 @@ export function modifierToStyles(mod: ParsedModifier): Record<string, string> {
       if (height !== undefined) style.height = `${height}px`;
       if (maxWidth !== undefined) style["max-width"] = maxWidth;
       if (maxHeight !== undefined) style["max-height"] = maxHeight;
+
+      // `.infinity` means "fill the parent", not "cap at 100%": the element
+      // must claim the full width/height too, which is what the `w-full` /
+      // `h-full` classes emitted by modifierToClasses() express.
+      if (style.width === undefined && readsInfinity(mod.rawArgs, "width")) style.width = "100%";
+      if (style.height === undefined && readsInfinity(mod.rawArgs, "height")) style.height = "100%";
+      if (style.width !== undefined || style.height !== undefined) style["box-sizing"] = "border-box";
       return style;
     }
     default:
@@ -474,14 +481,22 @@ function labeledNumber(raw: string, label: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Read `maxWidth:.infinity` (or `maxWidth:120`) as a CSS dimension. */
+/**
+ * Read `maxWidth:.infinity` (or `maxWidth:120`) as a CSS dimension.
+ * The label is matched case-insensitively so `maxWidth`/`maxwidth` both work.
+ */
 function labeledDimension(raw: string, label: string): string | undefined {
-  const match = raw.match(new RegExp(`${label}\\s*:\\s*([^,]+)`));
+  const match = raw.match(new RegExp(`${label}\\s*:\\s*([^,]+)`, "i"));
   if (!match) return undefined;
   const value = match[1].trim().replace(/^\./, "");
   if (value === "infinity") return "100%";
   const n = Number(value);
   return Number.isFinite(n) ? `${n}px` : undefined;
+}
+
+/** True when the flattened frame args ask the given axis to fill (`.infinity`). */
+function readsInfinity(raw: string, axis: "width" | "height"): boolean {
+  return new RegExp(`(?:max|min)?${axis}\\s*:\\s*\\.?infinity`, "i").test(raw);
 }
 
 export function modifierToClasses(mod: ParsedModifier): string[] {
@@ -496,10 +511,16 @@ export function modifierToClasses(mod: ParsedModifier): string[] {
       return ["text-base"];
     case "fontWeight":
       return val.toLowerCase().includes("bold") ? ["font-bold"] : ["font-normal"];
-    case "frame":
-      // Sizing cannot be expressed as static Tailwind classes; the numeric
-      // parts are emitted as inline styles by modifierToStyles().
-      return [];
+    case "frame": {
+      // `.frame(maxWidth: .infinity)` / `.frame(maxHeight: .infinity)` are
+      // SwiftUI's "fill the parent" idiom and map to Tailwind's full-size
+      // utilities. Numeric parts stay inline styles (modifierToStyles) so the
+      // preview never depends on a build-time safelist.
+      const classes: string[] = [];
+      if (readsInfinity(mod.rawArgs, "width")) classes.push("w-full", "self-stretch");
+      if (readsInfinity(mod.rawArgs, "height")) classes.push("h-full", "self-stretch");
+      return classes;
+    }
     case "clipShape":
       return ["rounded-full", "overflow-hidden"];
     case "aspectRatio":
