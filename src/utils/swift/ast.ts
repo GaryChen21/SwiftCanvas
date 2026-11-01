@@ -132,6 +132,11 @@ export interface ViewExpr {
   name: string;
   args: ArgExpr[];
   trailing?: Block;
+  /**
+   * Extra labeled trailing closures, Swift 5.3 style:
+   * `Button { action } label: { views }` → `[{ label: "label", block }]`.
+   */
+  labeledTrailing?: { label: string; block: Block }[];
   modifiers: ModifierExpr[];
 }
 
@@ -139,6 +144,8 @@ export interface ModifierExpr {
   name: string;
   args: ArgExpr[];
   trailing?: Block;
+  /** Labeled trailing closures, e.g. `.alert(…) { actions } message: { text }`. */
+  labeledTrailing?: { label: string; block: Block }[];
 }
 
 /* ────────────────────────────── Declarations ────────────────────────────── */

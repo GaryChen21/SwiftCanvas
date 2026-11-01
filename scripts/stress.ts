@@ -788,5 +788,111 @@ const FULL_BLEED = `struct ContentView: View {
   });
 }
 
+/* ══════════════════════ Suite 8 — Button closure forms & flexible controls ══════════════════════ */
+
+console.log("suite 8 — Button closure forms, alert message, flexible controls");
+
+const BUTTON_FORMS = `struct ContentView: View {
+    @State private var name = ""
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Button(action: { name = "ArgAction" }) { Text("Arg Action") }
+            Button { name = "MultiTrail" } label: { Text("Multi Trail") }
+            Button("Plain") { name = "Plain" }
+            Button(action: { name = "BothArgs" }, label: { Text("Both Args") })
+            Text("name: \\(name)")
+            TextField("Nama", text: $name)
+        }
+        .padding()
+    }
+}`;
+
+{
+  const { screen, runtime } = build(BUTTON_FORMS);
+  const buttons = byType(screen.node, "Button");
+
+  check("all four Button closure forms build their labels", () => {
+    assert.equal(buttons.length, 4);
+    assert.equal(buttons[0].children[0]?.text, "Arg Action");
+    assert.equal(buttons[1].children[0]?.text, "Multi Trail");
+    assert.equal(buttons[2].text, "Plain");
+    assert.equal(buttons[3].children[0]?.text, "Both Args");
+    assert.equal(
+      buttons.some((b) => b.text === "Button"),
+      false,
+      "no Button may fall back to the raw 'Button' label",
+    );
+  });
+
+  check("each Button contract wires its action", () => {
+    buttons[0].action?.();
+    assert.ok(hasText(runtime.buildScreen().node, "name: ArgAction"));
+    buttons[1].action?.();
+    assert.ok(hasText(runtime.buildScreen().node, "name: MultiTrail"));
+    buttons[2].action?.();
+    assert.ok(hasText(runtime.buildScreen().node, "name: Plain"));
+  });
+
+  check("TextField keeps its binding and renders as a field node", () => {
+    const field = byType(screen.node, "TextField")[0];
+    assert.ok(field, "TextField node exists");
+    assert.ok(field.bindings?.find((b) => b.label === "text")?.binding, "text binding exists");
+  });
+}
+
+const NAV_LABELED = `struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            NavigationLink { Text("Tujuan") } label: { Text("Buka") }
+        }
+    }
+}`;
+
+{
+  const { screen, runtime } = build(NAV_LABELED);
+
+  check("NavigationLink { } label: { } pushes its destination", () => {
+    const link = byType(screen.node, "NavigationLink")[0];
+    assert.ok(link, "NavigationLink node exists");
+    assert.ok(hasText(screen.node, "Buka"), "label missing");
+    assert.equal(hasText(screen.node, "Tujuan"), false, "destination must not render inline");
+    link.action?.();
+    assert.ok(hasText(runtime.buildScreen().node, "Tujuan"), "destination screen missing");
+  });
+}
+
+const ALERT_MESSAGE = `struct ContentView: View {
+    @State private var show = false
+
+    var body: some View {
+        Button("Warn") { show = true }
+            .alert("Hati-hati", isPresented: $show) {
+                Button("OK") { }
+            } message: {
+                Text("Pesan detail")
+            }
+    }
+}`;
+
+{
+  const { screen, runtime } = build(ALERT_MESSAGE);
+  textOf(screen.node, "Warn")?.action?.();
+  const presented = runtime.buildScreen();
+  const modal = presented.modals[0];
+
+  check("alert message: labeled trailing becomes the modal message", () => {
+    assert.ok(modal, "alert presented");
+    assert.equal(modal.kind, "alert");
+    assert.ok(modal.message, "modal exposes a message node");
+    assert.ok(hasText(modal.message!, "Pesan detail"), "message text missing");
+    assert.equal(
+      hasText(presented.node, "Pesan detail"),
+      false,
+      "message must not leak into the page tree",
+    );
+  });
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exitCode = 1;

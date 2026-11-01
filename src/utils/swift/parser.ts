@@ -970,10 +970,12 @@ export class Parser {
       const modTok = this.next();
       const modArgs = this.at("(") ? this.parseCallArgs() : [];
       const modTrailing = this.at("{") ? this.parseBlock() : undefined;
+      const modLabeled = this.parseLabeledTrailingClosures();
       modifiers.push({
         name: modTok.v,
         args: modArgs,
         ...(modTrailing ? { trailing: modTrailing } : {}),
+        ...(modLabeled.length > 0 ? { labeledTrailing: modLabeled } : {}),
       });
     }
     return modifiers;
@@ -1011,6 +1013,26 @@ export class Parser {
     return expr;
   }
 
+  /**
+   * Labeled trailing closures after a view call — the Swift 5.3+ form
+   * `Button { action } label: { views }`. Consumes `ident: { … }` pairs that
+   * directly follow the view expression.
+   */
+  private parseLabeledTrailingClosures(): { label: string; block: Block }[] {
+    const closures: { label: string; block: Block }[] = [];
+    while (
+      (this.peek().k === "ident" || this.peek().k === "keyword") &&
+      this.at(":", 1) &&
+      this.at("{", 2)
+    ) {
+      const label = this.next().v;
+      this.next(); // ':'
+      const block = this.parseBlock();
+      if (block) closures.push({ label, block });
+    }
+    return closures;
+  }
+
   private parseViewExpr(): ViewExpr | null {
     const t = this.peek();
     if (t.k !== "ident" || !VIEW_NAME_RE.test(t.v)) return null;
@@ -1031,9 +1053,16 @@ export class Parser {
     const name = t.v;
     const args = this.at("(") ? this.parseCallArgs() : [];
     const trailing = this.at("{") ? this.parseBlock() : undefined;
+    const labeledTrailing = this.parseLabeledTrailingClosures();
     const modifiers = this.parseModifierChain();
 
-    return { name, args, ...(trailing ? { trailing } : {}), modifiers };
+    return {
+      name,
+      args,
+      ...(trailing ? { trailing } : {}),
+      ...(labeledTrailing.length > 0 ? { labeledTrailing } : {}),
+      modifiers,
+    };
   }
 
   /* ────────────────────────────── Declarations ────────────────────────────── */

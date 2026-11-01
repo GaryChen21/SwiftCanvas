@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import type { PreviewRuntime, RModifier, RNode, Screen, ModalSpec } from "../utils/swift/viewBuilder";
 import { numOf, truthy, type Value } from "../utils/swift/evaluator";
 import {
@@ -14,14 +14,14 @@ import {
   type ResolvedFont,
 } from "../utils/swift/design";
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• View environment â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ══════════════════════════════ View environment ══════════════════════════════ */
 
 interface ViewEnv {
   font: ResolvedFont;
   color?: string;
   tint: string;
   multiline: "leading" | "center" | "trailing";
-  /** Layout axis of the parent stack â€” used by Divider and Spacer. */
+  /** Layout axis of the parent stack — used by Divider and Spacer. */
   axis: "vertical" | "horizontal" | "none";
   buttonStyle?: string;
   toggleStyle?: string;
@@ -53,7 +53,7 @@ const BASE_ENV: ViewEnv = {
   safeArea: { top: METRICS.safeAreaTop, bottom: METRICS.safeAreaBottom },
 };
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Modifier helpers â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ══════════════════════════════ Modifier helpers ══════════════════════════════ */
 
 const ENV_MODIFIERS = new Set([
   "font", "fontWeight", "bold", "italic", "underline", "strikethrough",
@@ -227,7 +227,7 @@ function dimension(value: Value | undefined): Dimension | undefined {
  *
  * The old implementation wrapped content in `<div style={{display:"contents"}}>`
  * which silently drops every box-model property (border-radius, box-shadow,
- * transform, filter, opacity, border, z-indexâ€¦). SwiftUI modifiers mutate the
+ * transform, filter, opacity, border, z-index…). SwiftUI modifiers mutate the
  * view they are applied to, so the patch belongs on the rendered element itself.
  */
 function mergeStyle(
@@ -251,7 +251,7 @@ function mergeStyle(
   return merged as React.CSSProperties;
 }
 
-/** True for host elements (`div`, `span`, `svg`, â€¦) â€” cloneable with styles. */
+/** True for host elements (`div`, `span`, `svg`, …) — cloneable with styles. */
 function isHostElement(node: React.ReactNode): node is React.ReactElement<{ style?: React.CSSProperties }> {
   return React.isValidElement(node) && typeof node.type === "string";
 }
@@ -261,7 +261,7 @@ function isHostElement(node: React.ReactNode): node is React.ReactElement<{ styl
  *
  * Host elements receive the style directly. Everything else (React view
  * components like `<TextBlock/>`, fragments, arrays) would silently drop
- * cloned props, so it is wrapped in a real box â€” the CSS equivalent of
+ * cloned props, so it is wrapped in a real box — the CSS equivalent of
  * SwiftUI's ModifiedContent layer.
  */
 function attachStyle(content: React.ReactNode, patch: React.CSSProperties): React.ReactNode {
@@ -282,9 +282,9 @@ type InteractionHandlers = {
 
 /**
  * Edges ignored by SwiftUI's safe-area modifier:
- *   .ignoresSafeArea()                            â†’ top + bottom
- *   .ignoresSafeArea(edges: .top)                 â†’ top
- *   .ignoresSafeArea(.container, edges: .bottom)  â†’ bottom
+ *   .ignoresSafeArea()                            → top + bottom
+ *   .ignoresSafeArea(edges: .top)                 → top
+ *   .ignoresSafeArea(.container, edges: .bottom)  → bottom
  *   .ignoresSafeArea(edges: [.top, .bottom])
  * The simulator shell only has vertical safe-area bands (status bar / home
  * indicator), so horizontal edges are parsed but have no inset to cancel.
@@ -351,8 +351,8 @@ function isGreedyVertical(child: RNode): boolean {
  * SwiftUI orders layers by (zIndex, source order); children without a
  * `.zIndex()` keep `0` and are broken by document order. Encoding the pair as
  * `(weight + 512) * 1000 + index` makes the same ordering explicit in CSS:
- * index 0 â†’ 512000, index 1 â†’ 512001, â€¦, while `.zIndex(1)` lifts a layer to
- * 513xxx â€” above every default layer but still below `.zIndex(2)`.
+ * index 0 → 512000, index 1 → 512001, …, while `.zIndex(1)` lifts a layer to
+ * 513xxx — above every default layer but still below `.zIndex(2)`.
  */
 const ZSTACK_ORDER_OFFSET = 512;
 const ZSTACK_ORDER_STRIDE = 1000;
@@ -403,7 +403,7 @@ function attachInteraction(
   );
 }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Node rendering â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ══════════════════════════════ Node rendering ══════════════════════════════ */
 
 const ViewNode: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env: parentEnv }) => {
   const env = React.useMemo(() => resolveEnv(node, parentEnv), [node, parentEnv]);
@@ -435,7 +435,7 @@ export const SwiftNode: React.FC<{ node: RNode; env?: Partial<ViewEnv> }> = ({ n
   <ViewNode node={node} env={{ ...BASE_ENV, ...env }} />
 );
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Base rendering per view type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Base rendering per view type ────────────────────────── */
 
 function renderBase(node: RNode, env: ViewEnv): React.ReactNode {
   switch (node.type) {
@@ -553,7 +553,7 @@ function renderBase(node: RNode, env: ViewEnv): React.ReactNode {
       return (
         <div className="rounded-lg border border-dashed border-[#C7C7CC] bg-[#F7F7F9] px-3 py-2 text-center">
           <div style={{ fontSize: 11, color: "#8E8E93", lineHeight: 1.3 }}>
-            {node.text} â€” not supported yet
+            {node.text} — not supported yet
           </div>
         </div>
       );
@@ -568,7 +568,7 @@ function renderChildren(node: RNode, env: ViewEnv): React.ReactNode {
   ));
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Structural modifier pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Structural modifier pipeline ────────────────────────── */
 
 function wrapModifiers(node: RNode, base: React.ReactNode, env: ViewEnv): React.ReactNode {
   let content = base;
@@ -847,7 +847,7 @@ function angleOf(value: Value | undefined): number {
   return 0;
 }
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Modifier wrappers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Modifier wrappers ────────────────────────── */
 
 const PaddingWrapper: React.FC<{ content: React.ReactNode; mod: RModifier }> = ({ content, mod }) => {
   const args = mod.args;
@@ -871,7 +871,7 @@ const PaddingWrapper: React.FC<{ content: React.ReactNode; mod: RModifier }> = (
 };
 
 /**
- * `.frame(...)` â€” the only modifier that must keep a real box: it can resize
+ * `.frame(...)` — the only modifier that must keep a real box: it can resize
  * the view and re-align the content inside it. `.infinity` cannot be mapped to
  * a blind `100%`: along a row axis it means "grow into the free space", along
  * a column axis it means "stretch across the parent".
@@ -923,7 +923,7 @@ const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: Vi
   if (typeof minHeight === "number") style.minHeight = minHeight;
   if (typeof maxHeight === "number") style.maxHeight = maxHeight;
 
-  // A frame with only a vertical size keeps the offered width â€” a shape or
+  // A frame with only a vertical size keeps the offered width — a shape or
   // GeometryReader inside must not collapse to its min-content width.
   const hasVerticalOnly =
     width === undefined &&
@@ -964,7 +964,7 @@ const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: Vi
 
 const BackgroundWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: ViewEnv }> = ({ content, mod, env }) => {
   const style = backgroundStyle(mod, env);
-  // `.background { â€¦ }` supplies a view that sits behind the content.
+  // `.background { … }` supplies a view that sits behind the content.
   const backgroundNodes = mod.children && mod.children.length > 0 ? (
     <div
       style={{
@@ -997,7 +997,7 @@ function backgroundStyle(mod: RModifier, env: ViewEnv): React.CSSProperties {
   const first = mod.args[0]?.value;
   const style: React.CSSProperties = {};
 
-  // A view-producing background closure: `.background { â€¦ }` (rendered by caller).
+  // A view-producing background closure: `.background { … }` (rendered by caller).
   if (mod.children && mod.children.length > 0) return style;
 
   const material = cssMaterial(first);
@@ -1060,7 +1060,7 @@ const OverlayWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: 
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Leaf views â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Leaf views ────────────────────────── */
 
 const TextBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const font = env.font;
@@ -1239,7 +1239,7 @@ const SymbolView: React.FC<{ name: string; size: number; color: string }> = ({ n
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Buttons ────────────────────────── */
 
 const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const role = isImplicitName(node.args.find((a) => a.label === "role")?.value);
@@ -1385,7 +1385,7 @@ const LinkBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Stacks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Stacks ────────────────────────── */
 
 function stackAlignment(alignmentName: string | null, direction: "column" | "row"): React.CSSProperties {
   if (direction === "column") {
@@ -1410,10 +1410,14 @@ const StackBlock: React.FC<{ node: RNode; env: ViewEnv; direction: "column" | "r
   const spacingArg = node.args.find((a) => a.label === "spacing")?.value;
   const spacing = typeof spacingArg === "number" ? spacingArg : METRICS.defaultStackSpacing;
   const axis: ViewEnv["axis"] = direction === "column" ? "vertical" : "horizontal";
-  // A row that contains a Spacer (or a greedy Color) consumes the offered
-  // width, exactly like SwiftUI's layout proposal. The same applies vertically
-  // to a column that contains a greedy child.
-  const greedyRow = direction === "row" && node.children.some((child) => child.type === "Spacer" || child.type === "Color");
+  // A row that contains a Spacer, a greedy Color or a flexible-width control
+  // (TextField/Slider/…) consumes the offered width, exactly like SwiftUI's
+  // layout proposal. The same applies vertically to a column that contains a
+  // greedy child.
+  const FLEXIBLE_ROW_TYPES = new Set([
+    "Spacer", "Color", "TextField", "SecureField", "TextEditor", "Slider",
+  ]);
+  const greedyRow = direction === "row" && node.children.some((child) => FLEXIBLE_ROW_TYPES.has(child.type));
   const greedyColumn = direction === "column" && node.children.some(isGreedyVertical);
 
   return (
@@ -1489,7 +1493,7 @@ const ZStackBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
 /**
  * GeometryReader measures its container and reports the size back to the
  * runtime, which rebuilds `geo.size` for the next render. Sub-pixel jitter is
- * filtered in PreviewRuntime.setGeometry so the observerâ†’rebuild loop settles.
+ * filtered in PreviewRuntime.setGeometry so the observer→rebuild loop settles.
  */
 const GeometryReaderBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const ref = React.useRef<HTMLDivElement>(null);
@@ -1628,7 +1632,7 @@ const ShapeBlock: React.FC<{ node: RNode; env: ViewEnv; type: string }> = ({ nod
 
   const background = fill ?? env.color ?? "#000000";
 
-  // Custom `Path { â€¦ }` builds an SVG path string in the view builder.
+  // Custom `Path { … }` builds an SVG path string in the view builder.
   if (type === "Path") {
     const d = node.args.find((a) => a.label === "d")?.value;
     const viewBox = node.args.find((a) => a.label === "viewBox")?.value;
@@ -1724,7 +1728,7 @@ const ShapeBlock: React.FC<{ node: RNode; env: ViewEnv; type: string }> = ({ nod
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Scroll / List / Section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Scroll / List / Section ────────────────────────── */
 
 const ScrollViewBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const axes = node.args[0]?.value;
@@ -1891,7 +1895,7 @@ const SectionBlock: React.FC<{ node: RNode; env: ViewEnv; inList?: boolean }> = 
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Controls ────────────────────────── */
 
 const ToggleBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const binding = node.bindings?.find((b) => b.label === "isOn" || b.label === undefined)?.binding;
@@ -2058,7 +2062,7 @@ const PickerBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
             </span>
           )}
           <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: "rgba(60,60,67,0.6)", fontSize: env.font.size }}>
-            {options[selectedIndex]?.label ?? "â€”"}
+            {options[selectedIndex]?.label ?? "—"}
             <SymbolView name="chevron.up.chevron.down" size={12} color="rgba(60,60,67,0.6)" />
           </span>
         </div>
@@ -2284,8 +2288,18 @@ const TextFieldBlock: React.FC<{ node: RNode; env: ViewEnv; secure: boolean }> =
   const multiline = isImplicitName(axis) === "vertical";
   const rounded = env.textFieldStyle === "roundedBorder";
 
+  // SwiftUI's TextField is flexible-width: it fills a column and takes the
+  // remaining space beside siblings in a row. `width:100%` inside a row would
+  // starve those siblings (text wraps to two lines), so the row case uses a
+  // zero-basis grow instead.
+  const inRow = env.axis === "horizontal";
   const common: React.CSSProperties = {
-    width: "100%",
+    ...(inRow
+      ? { flexGrow: 1, flexBasis: 0 }
+      : { width: "100%" }),
+    // Never let a shrink-to-fit flex parent collapse the control.
+    alignSelf: "stretch",
+    minWidth: 0,
     fontFamily: cssFontFamily(env.font),
     fontSize: env.font.size,
     color: env.color ?? "#000",
@@ -2323,13 +2337,16 @@ const TextFieldBlock: React.FC<{ node: RNode; env: ViewEnv; secure: boolean }> =
 const TextEditorBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const binding = node.bindings?.find((b) => b.label === "text")?.binding;
   const value = typeof binding?.get() === "string" ? (binding.get() as string) : "";
+  const inRow = env.axis === "horizontal";
   return (
     <textarea
       value={value}
       onChange={(event) => binding?.set(event.target.value)}
       rows={5}
       style={{
-        width: "100%",
+        ...(inRow ? { flexGrow: 1, flexBasis: 0 } : { width: "100%" }),
+        alignSelf: "stretch",
+        minWidth: 0,
         fontFamily: cssFontFamily(env.font),
         fontSize: env.font.size,
         border: "1px solid rgba(60,60,67,0.29)",
@@ -2434,7 +2451,7 @@ const Spinner: React.FC = () => (
   />
 );
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Grids â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Grids ────────────────────────── */
 
 const GridBlock: React.FC<{ node: RNode; env: ViewEnv; direction: "vertical" | "horizontal" }> = ({ node, env, direction }) => {
   const itemsArg = node.args.find((a) => a.label === "columns" || a.label === "rows")?.value;
@@ -2503,7 +2520,7 @@ const SwiftGridBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) 
   </div>
 );
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ TabView / Menu / Disclosure â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── TabView / Menu / Disclosure ────────────────────────── */
 
 const TabViewBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => {
   const binding = node.bindings?.find((b) => b.label === "selection")?.binding;
@@ -2636,7 +2653,7 @@ const ContentUnavailableBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node
   );
 };
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Screen chrome â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ══════════════════════════════ Screen chrome ══════════════════════════════ */
 
 const NavBar: React.FC<{ screen: Screen; env: ViewEnv; onBack: () => void }> = ({ screen, env, onBack }) => {
   const showBar = !!screen.title || !screen.isRoot || screen.toolbar.length > 0;
@@ -2705,7 +2722,7 @@ const NavBar: React.FC<{ screen: Screen; env: ViewEnv; onBack: () => void }> = (
   );
 };
 
-/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Modals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ────────────────────────── Modals ────────────────────────── */
 
 const ModalLayer: React.FC<{ modals: ModalSpec[]; env: ViewEnv }> = ({ modals, env }) => (
   <>
@@ -2816,7 +2833,7 @@ const AlertView: React.FC<{ modal: ModalSpec; env: ViewEnv }> = ({ modal, env })
   );
 };
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• Root component â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+/* ══════════════════════════════ Root component ══════════════════════════════ */
 
 export interface SwiftPreviewProps {
   runtime: PreviewRuntime;

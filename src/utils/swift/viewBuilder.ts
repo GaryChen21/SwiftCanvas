@@ -710,15 +710,41 @@ export class PreviewRuntime implements EvalHost {
 
     const isActionTrailing = ACTION_TRAILING_VIEWS.has(view.name);
 
-    // Button forms:
+    // Button forms, all resolved through one action/label extraction:
     //   Button("Title") { action }
     //   Button { action } label: { views }
     //   Button(action: { … }) { label }
+    //   Button(action: { … }, label: { views })
+    //   Button("Title", action: { … })
     if (view.name === "Button") {
       const labelClosure = args.find((a) => a.label === "label" && isClosure(a.value));
       const actionClosure = args.find((a) => a.label === "action" && isClosure(a.value));
+      const labelTrailing = view.labeledTrailing?.find((t) => t.label === "label");
+      const actionTrailing = view.labeledTrailing?.find((t) => t.label === "action");
 
-      if (labelClosure && isClosure(labelClosure.value)) {
+      // ── Action ──────────────────────────────────────────────────────────
+      // `action:` trailing > `action:` argument > unlabeled trailing. The
+      // unlabeled trailing is only an action when it is not the label of an
+      // argument-supplied action (`Button(action: { … }) { label }`).
+      const argumentAction =
+        actionClosure && isClosure(actionClosure.value) ? actionClosure.value.block : undefined;
+      const hasExternalLabel =
+        labelTrailing !== undefined || (labelClosure !== undefined && isClosure(labelClosure.value));
+      const actionBlock =
+        actionTrailing?.block ??
+        argumentAction ??
+        (labelTrailing !== undefined || !hasExternalLabel ? view.trailing : undefined);
+      if (actionBlock) {
+        node.action = () => runStatements(actionBlock.asStatements(), new Env(env), this);
+      }
+
+      // ── Label ───────────────────────────────────────────────────────────
+      // `label:` trailing > `label:` argument > title string > trailing (when
+      // the action came from an argument, the trailing is the label).
+      if (labelTrailing) {
+        node.children = this.buildItems(labelTrailing.block.asViews().items, new Env(env), path);
+        node.text = undefined;
+      } else if (labelClosure && isClosure(labelClosure.value)) {
         node.children = this.buildItems(
           labelClosure.value.block?.asViews().items ?? [],
           new Env(env),
@@ -727,20 +753,11 @@ export class PreviewRuntime implements EvalHost {
         node.text = undefined;
       } else if (typeof args[0]?.value === "string") {
         node.text = args[0].value;
+      } else if (view.trailing && (actionClosure !== undefined || actionTrailing !== undefined)) {
+        node.children = this.buildItems(view.trailing.asViews().items, new Env(env), path);
+        node.text = undefined;
       }
 
-      if (actionClosure && isClosure(actionClosure.value) && actionClosure.value.block) {
-        const block = actionClosure.value.block;
-        node.action = () => runStatements(block.asStatements(), new Env(env), this);
-      } else if (view.trailing) {
-        const block = view.trailing;
-        node.action = () => runStatements(block.asStatements(), new Env(env), this);
-      }
-
-      // `Button { action } label: { … }` — trailing holds the action.
-      if (!node.action && view.trailing && node.children.length > 0) {
-        node.action = () => runStatements(view.trailing!.asStatements(), new Env(env), this);
-      }
       if (!node.children.length && node.text === undefined) {
         node.text = "Button";
       }
@@ -970,11 +987,26 @@ export class PreviewRuntime implements EvalHost {
     view: ViewExpr,
     env: Env,
     path: string,
-  ): void {    const args = this.evalArgs(view.args, env);
+  ): void {
+    const args = this.evalArgs(view.args, env);
 
     // `NavigationLink(destination: X) { label }`
     const destinationArg = args.find((a) => a.label === "destination");
     const labelClosure = args.find((a) => isClosure(a.value) && a.label !== "destination");
+    const labeledLabel = view.labeledTrailing?.find((t) => t.label === "label");
+
+    // `NavigationLink { Destination() } label: { label }` — Swift 5.3+ form:
+    // the unlabeled trailing is the destination, the labeled one the label.
+    if (labeledLabel) {
+      const destinationItems =
+        (destinationArg && isClosure(destinationArg.value)
+          ? destinationArg.value.block?.asViews().items
+          : undefined) ?? (view.trailing ? view.trailing.asViews().items : []);
+      node.children = this.buildItems(labeledLabel.block.asViews().items, new Env(env), path);
+      node.text = undefined;
+      node.action = this.makePushAction(destinationItems, env, path);
+      return;
+    }
 
     if (typeof args[0]?.value === "string" && view.trailing) {
       node.text = args[0].value;
@@ -1145,10 +1177,19 @@ export class PreviewRuntime implements EvalHost {
 
         case "alert":
         case "confirmationDialog": {
+          // The message is a labeled trailing closure (`.alert(…) { … } message: { … }`);
+          // the `message:` argument form is kept for completeness.
+          const messageTrailing = modifier.labeledTrailing?.find((t) => t.label === "message");
           const messageClosure = args.find(
             (a) => isClosure(a.value) && a.label === "message",
           );
-          if (messageClosure && isClosure(messageClosure.value)) {
+          if (messageTrailing) {
+            result.children = this.buildItems(
+              messageTrailing.block.asViews().items,
+              new Env(env),
+              modPath,
+            );
+          } else if (messageClosure && isClosure(messageClosure.value)) {
             const items = messageClosure.value.block?.asViews().items ?? [];
             result.children = this.buildItems(items, new Env(env), modPath);
           }
