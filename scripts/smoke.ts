@@ -624,25 +624,50 @@ check("html escaping prevents markup injection", () => {
 check("frame(maxWidth: .infinity) maps to w-full", () => {
   const { html } = transpileSwift('Text("x").frame(maxWidth: .infinity)');
   assert.match(html, /w-full/);
-  assert.match(html, /width:100%/);
+  assert.match(html, /[;"]width:100%/);
 });
 
 check("Button(.frame(maxWidth: .infinity)) becomes full width", () => {
   const { html } = transpileSwift('Button("Tap Me") { }.frame(maxWidth: .infinity)');
   assert.match(html, /<button[^>]*class="[^"]*\bw-full\b/);
-  assert.match(html, /style="[^"]*width:100%/);
+  assert.match(html, /style="[^"]*[;"]width:100%/);
 });
 
 check("frame(maxHeight: .infinity) maps to h-full", () => {
   const { html } = transpileSwift('VStack { }.frame(maxHeight: .infinity)');
   assert.match(html, /\bh-full\b/);
-  assert.match(html, /height:100%/);
+  assert.match(html, /[;"]height:100%/);
 });
 
 check("fixed frame numbers stay inline styles without fill classes", () => {
   const { html } = transpileSwift('Text("x").frame(width: 120, height: 40)');
   assert.match(html, /width:120px/);
   assert.equal(/\bw-full\b/.test(html), false);
+});
+
+check("frame fills are read from every argument, not only the first", () => {
+  const { html } = transpileSwift('Text("x").frame(minWidth: 0, maxWidth: .infinity)');
+  assert.match(html, /\bw-full\b/);
+  assert.match(html, /[;"]width:100%/);
+
+  const stacked = transpileSwift('VStack { }.frame(maxWidth: .infinity, maxHeight: .infinity)');
+  assert.match(stacked.html, /\bw-full\b/);
+  assert.match(stacked.html, /\bh-full\b/);
+  assert.match(stacked.html, /[;"]height:100%/);
+});
+
+check("idealWidth: .infinity is not a fill", () => {
+  const { html } = transpileSwift('Text("x").frame(idealWidth: .infinity)');
+  assert.equal(/\bw-full\b/.test(html), false);
+  assert.equal(/[;"]width:100%/.test(html), false);
+});
+
+check("a frame fill inside an HStack becomes a flexible row item", () => {
+  const { html } = transpileSwift('HStack { TextField("q").frame(maxWidth: .infinity); Button("Go") { } }');
+  assert.match(html, /\bflex-1\b/);
+  assert.match(html, /\bbasis-0\b/);
+  assert.match(html, /flex-grow:1/);
+  assert.equal(/[;"]width:100%/.test(html), false, "width:100% would squeeze the row siblings");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

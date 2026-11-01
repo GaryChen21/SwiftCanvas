@@ -12,9 +12,11 @@ import assert from "node:assert/strict";
 import {
   frameClasses,
   frameLayout,
+  frameStretches,
   hasFrameSizing,
   interpret,
   spacerClasses,
+  viewWantsFullWidth,
   type RNode,
   type Screen,
 } from "../src/utils/swift/index.ts";
@@ -950,7 +952,6 @@ const FORM_LAYOUT = `struct ContentView: View {
     assert.ok(layout, "frame layout exists");
     assert.equal(layout.fillX, true);
     assert.equal(layout.fillY, false);
-    assert.equal(layout.growX, true);
     assert.equal(hasFrameSizing(layout), true);
   });
 
@@ -989,6 +990,74 @@ const FORM_LAYOUT = `struct ContentView: View {
   check("Spacer inside a Button label survives as a spacer node", () => {
     const labelSpacer = findAll(screen.node, (n) => n.type === "Spacer");
     assert.ok(labelSpacer.length >= 1, "spacer node exists in the label");
+  });
+
+  check("a horizontal Spacer makes its row and button greedy", () => {
+    const { screen: rowScreen } = build(`struct ContentView: View {
+      var body: some View {
+        HStack { Text("A"); Spacer() }
+      }
+    }`);
+    const rowSpacer = findAll(rowScreen.node, (n) => n.type === "Spacer")[0];
+    assert.equal(viewWantsFullWidth(rowSpacer, "horizontal"), true);
+
+    const { screen: buttonScreen } = build(`struct ContentView: View {
+      var body: some View {
+        Button { } label: {
+          HStack { Text("Kirim"); Spacer() }
+        }
+      }
+    }`);
+    const button = byType(buttonScreen.node, "Button")[0];
+    assert.equal(
+      button.children.some((child) => viewWantsFullWidth(child, "horizontal")),
+      true,
+      "a row label with a Spacer makes the button greedy",
+    );
+  });
+
+  check("a vertical Spacer does not make a row or button greedy", () => {
+    const { screen: rowScreen } = build(`struct ContentView: View {
+      var body: some View {
+        HStack { VStack { Text("A"); Spacer() } }
+      }
+    }`);
+    const nested = byType(rowScreen.node, "VStack")[0];
+    assert.equal(viewWantsFullWidth(nested, "horizontal"), false);
+
+    const { screen: buttonScreen } = build(`struct ContentView: View {
+      var body: some View {
+        Button { } label: {
+          VStack { Text("Entri"); Spacer() }
+        }
+      }
+    }`);
+    const button = byType(buttonScreen.node, "Button")[0];
+    assert.equal(
+      button.children.some((child) => viewWantsFullWidth(child, "horizontal")),
+      false,
+      "a stacked label must keep the button content-sized",
+    );
+  });
+
+  check("flat containers decide stretching per rendered child", () => {
+    const { screen: textGroup } = build(`struct ContentView: View {
+      var body: some View { Group { Text("x") }.frame(maxWidth: .infinity) }
+    }`);
+    assert.equal(frameStretches(textGroup.node), false, "a Text keeps its intrinsic box");
+
+    const { screen: fieldGroup } = build(`struct ContentView: View {
+      @State private var name = ""
+      var body: some View {
+        Group { TextField("Nama", text: $name) }.frame(maxWidth: .infinity)
+      }
+    }`);
+    assert.equal(frameStretches(fieldGroup.node), true, "a TextField fills the frame");
+
+    const { screen: vstack } = build(`struct ContentView: View {
+      var body: some View { VStack { Text("x") }.frame(maxWidth: .infinity) }
+    }`);
+    assert.equal(frameStretches(vstack.node), true, "containers fill the frame");
   });
 }
 

@@ -21,6 +21,7 @@ import {
   type Statement,
   type ViewSpec,
 } from "./swiftIR.ts";
+import type { LayoutAxis } from "./swift/layout.ts";
 
 /* ──────────────────────────── Public types ──────────────────────────── */
 
@@ -222,6 +223,8 @@ export function tokenize(src: string): Token[] {
 interface ParsedModifier {
   name: string;
   rawArgs: string;
+  /** Every comma-separated argument, so labelled reads see all of them. */
+  args: string[];
   /** Trailing closure, e.g. `.onAppear { increment() }`. */
   closure?: Token[];
 }
@@ -297,16 +300,16 @@ function parseModifiers(st: ParserState): ParsedModifier[] {
     if (nextTok && nextTok.value === "(") {
       st.pos += 2;
       const args = parseParenArgs(st);
-      modifiers.push({ name: nameTok.value, rawArgs: args[0] ?? "" });
+      modifiers.push({ name: nameTok.value, args, rawArgs: args.join(", ") });
       // parseParenArgs left st.pos past the close paren;
       // the while loop checks for the next "."
     } else if (nextTok && nextTok.value === "{") {
       // Trailing closure modifier: .onAppear { ... } / .onTapGesture { ... }
       st.pos += 2;
       const closure = parseBraceBody(st);
-      modifiers.push({ name: nameTok.value, rawArgs: "", closure });
+      modifiers.push({ name: nameTok.value, args: [], rawArgs: "", closure });
     } else {
-      modifiers.push({ name: nameTok.value, rawArgs: "" });
+      modifiers.push({ name: nameTok.value, args: [], rawArgs: "" });
       st.pos += 2;
     }
   }
@@ -318,8 +321,24 @@ function isSelfClosingView(name: string): boolean {
     "RoundedRectangle", "Ellipse", "Capsule", "Color"].includes(name);
 }
 
+/**
+ * The axis a container lays its children out on, or "none" for views that do
+ * not stack their content (used to map `.frame(...)` fills correctly).
+ */
+function childAxis(viewName: string, args: string[], parentAxis: LayoutAxis): LayoutAxis {
+  if (viewName === "HStack" || viewName === "LazyHStack") return "horizontal";
+  if (viewName === "VStack" || viewName === "LazyVStack" || viewName === "List" || viewName === "Form") {
+    return "vertical";
+  }
+  if (viewName === "ScrollView") {
+    return unquoteArg(args[0] ?? "").toLowerCase().includes("horizontal") ? "horizontal" : "vertical";
+  }
+  if (viewName === "ZStack") return "none";
+  return parentAxis;
+}
+
 /** Parse one view node at st.pos (must be a "view" token). */
-function parseView(st: ParserState): AstNode | null {
+function parseView(st: ParserState, axis: LayoutAxis = "none"): AstNode | null {
   const tok = st.tokens[st.pos];
   if (!tok || tok.kind !== "view") return null;
 
@@ -331,7 +350,7 @@ function parseView(st: ParserState): AstNode | null {
   if (isSelfClosingView(viewName)) {
     const selfArgs = st.tokens[st.pos]?.value === "(" ? parseParenArgs(st) : [];
     modifiers = parseModifiers(st);
-    return renderNode(viewName, modifiers, [], selfArgs);
+    return renderNode(viewName, modifiers, [], selfArgs, axis);
   }
 
   // Views with args: Text("hello"), Image("pic")
@@ -354,8 +373,9 @@ function parseView(st: ParserState): AstNode | null {
     pos: 0,
   };
   const children: AstNode[] = [];
+  const nextAxis = childAxis(viewName, args, axis);
   while (childState.pos < bodyTokens.length) {
-    const child = parseView(childState);
+    const child = parseView(childState, nextAxis);
     if (child) {
       children.push(child);
     } else {
@@ -364,7 +384,7 @@ function parseView(st: ParserState): AstNode | null {
     }
   }
 
-  return renderNode(viewName, modifiers, children, args);
+  return renderNode(viewName, modifiers, children, args, axis);
 }
 
 /* ──────────────────────────── Render ──────────────────────────── */
@@ -413,7 +433,7 @@ export function resolveColor(raw: string): string {
  * styles rather than arbitrary Tailwind classes, so the preview never depends
  * on a build-time safelist.
  */
-export function modifierToStyles(mod: ParsedModifier): Record<string, string> {
+export function modifierToStyles(mod: ParsedModifier, axis: LayoutAxis = "none"): Record<string, string> {
   const n = Number(unquoteArg(mod.rawArgs));
 
   switch (mod.name) {
@@ -440,20 +460,38 @@ export function modifierToStyles(mod: ParsedModifier): Record<string, string> {
     }
     case "frame": {
       const style: Record<string, string> = {};
-      const width = labeledNumber(mod.rawArgs, "width") ?? leadingNumber(mod.rawArgs);
-      const height = labeledNumber(mod.rawArgs, "height");
-      const maxWidth = labeledDimension(mod.rawArgs, "maxWidth");
-      const maxHeight = labeledDimension(mod.rawArgs, "maxHeight");
+      const { widthValue, heightValue, fillsWidth, fillsHeight } = readFrameArgs(mod.args);
+      const width = numberOfValue(widthValue);
+      const height = numberOfValue(heightValue);
+      const maxWidth = dimensionOfValue(frameArgValue(mod.args, "maxWidth"));
+      const maxHeight = dimensionOfValue(frameArgValue(mod.args, "maxHeight"));
       if (width !== undefined) style.width = `${width}px`;
       if (height !== undefined) style.height = `${height}px`;
       if (maxWidth !== undefined) style["max-width"] = maxWidth;
       if (maxHeight !== undefined) style["max-height"] = maxHeight;
 
       // `.infinity` means "fill the parent", not "cap at 100%": the element
-      // must claim the full width/height too, which is what the `w-full` /
-      // `h-full` classes emitted by modifierToClasses() express.
-      if (style.width === undefined && readsInfinity(mod.rawArgs, "width")) style.width = "100%";
-      if (style.height === undefined && readsInfinity(mod.rawArgs, "height")) style.height = "100%";
+      // must claim the full width/height too. Inside a row the flex classes
+      // from modifierToClasses() do that instead — a blind `width:100%` would
+      // squeeze the siblings of the row.
+      if (fillsWidth) {
+        if (axis === "horizontal") {
+          style["flex-grow"] = "1";
+          style["flex-basis"] = "0";
+          style["min-width"] = "0";
+        } else if (style.width === undefined) {
+          style.width = "100%";
+        }
+      }
+      if (fillsHeight) {
+        if (axis === "vertical") {
+          style["flex-grow"] = "1";
+          style["flex-basis"] = "0";
+          style["min-height"] = "0";
+        } else if (style.height === undefined) {
+          style.height = "100%";
+        }
+      }
       if (style.width !== undefined || style.height !== undefined) style["box-sizing"] = "border-box";
       return style;
     }
@@ -467,39 +505,71 @@ function numericValue(raw: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-function leadingNumber(raw: string): number | undefined {
-  const first = raw.split(",")[0]?.trim() ?? "";
-  const n = Number(unquoteArg(first));
+/** Read one `label: value` argument out of a parsed modifier argument list. */
+function frameArgValue(args: string[], label: string): string | undefined {
+  for (const arg of args) {
+    const colon = arg.indexOf(":");
+    if (colon < 0) continue;
+    if (arg.slice(0, colon).trim() !== label) continue;
+    return arg.slice(colon + 1).trim();
+  }
+  return undefined;
+}
+
+/** Positional frame arguments (`.frame(120)`), in source order. */
+function positionalArgs(args: string[]): string[] {
+  return args.filter((arg) => !arg.includes(":"));
+}
+
+function isInfinityValue(value: string | undefined): boolean {
+  return value !== undefined && value.replace(/^\./, "") === "infinity";
+}
+
+function numberOfValue(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(unquoteArg(value));
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Read `width:120` / `height:40` style arguments from a flattened raw arg. */
-function labeledNumber(raw: string, label: string): number | undefined {
-  const match = raw.match(new RegExp(`${label}\\s*:\\s*(-?[0-9.]+)`));
-  if (!match) return undefined;
-  const n = Number(match[1]);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/**
- * Read `maxWidth:.infinity` (or `maxWidth:120`) as a CSS dimension.
- * The label is matched case-insensitively so `maxWidth`/`maxwidth` both work.
- */
-function labeledDimension(raw: string, label: string): string | undefined {
-  const match = raw.match(new RegExp(`${label}\\s*:\\s*([^,]+)`, "i"));
-  if (!match) return undefined;
-  const value = match[1].trim().replace(/^\./, "");
-  if (value === "infinity") return "100%";
-  const n = Number(value);
+/** `maxWidth:.infinity` (or `maxWidth:120`) as a CSS dimension. */
+function dimensionOfValue(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const bare = value.replace(/^\./, "");
+  if (bare === "infinity") return "100%";
+  const n = Number(bare);
   return Number.isFinite(n) ? `${n}px` : undefined;
 }
 
-/** True when the flattened frame args ask the given axis to fill (`.infinity`). */
-function readsInfinity(raw: string, axis: "width" | "height"): boolean {
-  return new RegExp(`(?:max|min)?${axis}\\s*:\\s*\\.?infinity`, "i").test(raw);
+/**
+ * Read the frame's sizing arguments, mirroring `frameLayout()` in
+ * `swift/layout.ts` so both engines agree: only the exact labels `width`,
+ * `minWidth`, `maxWidth` (and the positional width/height) may fill an axis —
+ * `idealWidth: .infinity` is not a fill.
+ */
+function readFrameArgs(args: string[]): {
+  widthValue?: string;
+  heightValue?: string;
+  fillsWidth: boolean;
+  fillsHeight: boolean;
+} {
+  const positional = positionalArgs(args);
+  const widthValue = frameArgValue(args, "width") ?? positional[0];
+  const heightValue = frameArgValue(args, "height") ?? positional[1];
+  return {
+    widthValue,
+    heightValue,
+    fillsWidth:
+      isInfinityValue(widthValue) ||
+      isInfinityValue(frameArgValue(args, "minWidth")) ||
+      isInfinityValue(frameArgValue(args, "maxWidth")),
+    fillsHeight:
+      isInfinityValue(heightValue) ||
+      isInfinityValue(frameArgValue(args, "minHeight")) ||
+      isInfinityValue(frameArgValue(args, "maxHeight")),
+  };
 }
 
-export function modifierToClasses(mod: ParsedModifier): string[] {
+export function modifierToClasses(mod: ParsedModifier, axis: LayoutAxis = "none"): string[] {
   const val = unquoteArg(mod.rawArgs);
 
   // Note: value-dependent modifiers are handled by modifierToStyles().
@@ -513,12 +583,26 @@ export function modifierToClasses(mod: ParsedModifier): string[] {
       return val.toLowerCase().includes("bold") ? ["font-bold"] : ["font-normal"];
     case "frame": {
       // `.frame(maxWidth: .infinity)` / `.frame(maxHeight: .infinity)` are
-      // SwiftUI's "fill the parent" idiom and map to Tailwind's full-size
-      // utilities. Numeric parts stay inline styles (modifierToStyles) so the
-      // preview never depends on a build-time safelist.
+      // SwiftUI's "fill the parent" idiom and map to the same Tailwind
+      // utilities the live canvas uses: `w-full` across a column, `flex-1
+      // basis-0 min-w-0` inside a row. Numeric parts stay inline styles
+      // (modifierToStyles) so nothing depends on a build-time safelist.
       const classes: string[] = [];
-      if (readsInfinity(mod.rawArgs, "width")) classes.push("w-full", "self-stretch");
-      if (readsInfinity(mod.rawArgs, "height")) classes.push("h-full", "self-stretch");
+      const { fillsWidth, fillsHeight } = readFrameArgs(mod.args);
+      if (fillsWidth) {
+        classes.push(
+          ...(axis === "horizontal"
+            ? ["flex-1", "basis-0", "min-w-0", "self-stretch"]
+            : ["w-full", "max-w-full", "self-stretch"]),
+        );
+      }
+      if (fillsHeight) {
+        classes.push(
+          ...(axis === "vertical"
+            ? ["flex-1", "basis-0", "min-h-0", "self-stretch"]
+            : ["h-full", "max-h-full", "self-stretch"]),
+        );
+      }
       return classes;
     }
     case "clipShape":
@@ -615,13 +699,14 @@ function renderNode(
   modifiers: ParsedModifier[],
   children: AstNode[],
   args: string[],
+  axis: LayoutAxis = "none",
 ): AstNode {
   // Structural + static modifier classes come from Tailwind.
   const allClasses: string[] = [];
   const base = baseClasses(name);
   if (base) allClasses.push(base);
   for (const mod of modifiers) {
-    allClasses.push(...modifierToClasses(mod));
+    allClasses.push(...modifierToClasses(mod, axis));
   }
 
   // De-duplicate, preserving order.
@@ -631,7 +716,7 @@ function renderNode(
   // Value-dependent modifiers become inline styles (no safelist needed).
   const styles: Record<string, string> = {};
   for (const mod of modifiers) {
-    Object.assign(styles, modifierToStyles(mod));
+    Object.assign(styles, modifierToStyles(mod, axis));
   }
 
   const attrs: Record<string, string> = {};

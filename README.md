@@ -35,8 +35,8 @@ Verifikasi dan build produksi:
 
 ```bash
 npm run typecheck      # cek tipe TypeScript
-npm test               # 44 tes regresi interpreter
-npm run test:stress    # 48 tes stres SwiftUI (grid, GeometryReader, Path, Button)
+npm test               # 47 tes regresi interpreter
+npm run test:stress    # 51 tes stres SwiftUI (grid, GeometryReader, Path, Button)
 npm run build          # build produksi (typecheck + vite)
 ```
 

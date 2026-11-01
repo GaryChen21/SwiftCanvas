@@ -6,7 +6,7 @@
  * This module turns that AST shape into the layout intent both engines need:
  *
  *   - which axis the view must fill (X / Y),
- *   - whether the view must flex-grow along the parent stack's main axis,
+ *   - how that fill behaves inside a row vs a column stack,
  *   - the exact Tailwind classes that express it (`w-full`, `h-full`, …).
  *
  * The React renderer applies the classes *and* keeps inline styles authoritative
@@ -56,9 +56,6 @@ export interface FrameLayout {
   /** The view must span the parent's full width / height. */
   fillX: boolean;
   fillY: boolean;
-  /** The view grows along a row's / column's main axis (like a Spacer). */
-  growX: boolean;
-  growY: boolean;
 }
 
 /** Read the `.frame(...)` modifier of a node, if any, as a layout intent. */
@@ -85,8 +82,6 @@ export function frameLayout(modifiers: RModifier[]): FrameLayout | null {
     maxHeight,
     fillX: width === "infinity" || minWidth === "infinity" || maxWidth === "infinity",
     fillY: height === "infinity" || minHeight === "infinity" || maxHeight === "infinity",
-    growX: minWidth === "infinity" || maxWidth === "infinity",
-    growY: minHeight === "infinity" || maxHeight === "infinity",
   };
 }
 
@@ -151,24 +146,75 @@ export function stretchesToFrame(type: string): boolean {
 }
 
 /**
- * Views that consume the offered width even without a frame: a Spacer, a
- * greedy `Color` fill or a flexible control. Shared with the stack renderer so
- * "this subtree wants the full width" has one definition.
+ * Views that render their children flat: they have no box of their own, so the
+ * frame's children become direct flex items of the frame wrapper.
  */
-export const FLEXIBLE_WIDTH_TYPES = new Set([
-  "Spacer", "Color", "Material", "TextField", "SecureField", "TextEditor", "Slider",
+const FLAT_CONTENT_TYPES = new Set([
+  "Group", "EmptyView", "GridRow", "ToolbarItem", "ToolbarItemGroup",
 ]);
 
+export function rendersChildrenFlat(type: string): boolean {
+  return FLAT_CONTENT_TYPES.has(type);
+}
+
 /**
- * True when the node (or any descendant) asks for the full available width —
- * either through a `.frame(maxWidth: .infinity)` or a greedy child. A Button
- * whose label fills the width must itself fill the width, which is the
- * idiomatic SwiftUI recipe for a full-width button.
+ * Whether the frame's content must be stretched to fill it.
+ *
+ * Text-like views keep their intrinsic box (SwiftUI centers them inside the
+ * wider frame), while controls and containers stretch. A flat container has no
+ * box of its own — the decision belongs to the children that actually render —
+ * so `Group { Text(…) }.frame(maxWidth: .infinity)` keeps the text intrinsic
+ * instead of stretching every flattened child.
  */
-export function viewWantsFullWidth(node: RNode): boolean {
-  if (FLEXIBLE_WIDTH_TYPES.has(node.type)) return true;
+export function frameStretches(node: RNode): boolean {
+  if (rendersChildrenFlat(node.type)) {
+    return node.children.some((child) => stretchesToFrame(child.type));
+  }
+  return stretchesToFrame(node.type);
+}
+
+/**
+ * Views that consume the offered width even without a frame: a greedy `Color`
+ * fill or a flexible control. `Spacer` is axis-dependent and handled in
+ * `viewWantsFullWidth`.
+ */
+const WIDTH_CONSUMING_TYPES = new Set([
+  "Color", "Material", "TextField", "SecureField", "TextEditor", "Slider",
+]);
+
+/** Views whose children are laid out along a known axis. */
+const ROW_TYPES = new Set(["HStack", "LazyHStack"]);
+const COLUMN_TYPES = new Set([
+  "VStack", "LazyVStack", "List", "Form", "Section", "DisclosureGroup", "LabeledContent",
+]);
+
+/** The axis a view lays its children out on; unknown views inherit the parent's. */
+function childAxis(node: RNode, parentAxis: LayoutAxis): LayoutAxis {
+  if (ROW_TYPES.has(node.type)) return "horizontal";
+  if (COLUMN_TYPES.has(node.type)) return "vertical";
+  if (node.type === "ScrollView") {
+    return implicitMemberName(node.args[0]?.value) === "horizontal" ? "horizontal" : "vertical";
+  }
+  return parentAxis;
+}
+
+/**
+ * True when the node (or a descendant) asks for the full available width on the
+ * given container axis — either through a `.frame(maxWidth: .infinity)` or a
+ * greedy child.
+ *
+ * The axis matters: a Spacer only flexes along the axis of the stack it sits
+ * in, so a vertical Spacer inside a `VStack` must not make an enclosing `HStack`
+ * greedy, nor a Button whose label stacks vertically. A Button whose label
+ * fills the width must itself fill the width, which is the idiomatic SwiftUI
+ * recipe for a full-width button.
+ */
+export function viewWantsFullWidth(node: RNode, axis: LayoutAxis): boolean {
+  if (node.type === "Spacer") return axis === "horizontal";
+  if (WIDTH_CONSUMING_TYPES.has(node.type)) return true;
   if (frameLayout(node.modifiers)?.fillX) return true;
-  return node.children.some(viewWantsFullWidth);
+  const next = childAxis(node, axis);
+  return node.children.some((child) => viewWantsFullWidth(child, next));
 }
 
 /** Tailwind classes for a view that must span the container width. */

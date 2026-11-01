@@ -4,11 +4,11 @@ import { numOf, truthy, type Value } from "../utils/swift/evaluator";
 import {
   frameClasses,
   frameLayout,
+  frameStretches,
   fullWidthClasses,
   hasFrameSizing,
   implicitMemberName as isImplicitName,
   spacerClasses,
-  stretchesToFrame,
   viewWantsFullWidth,
 } from "../utils/swift/layout";
 import {
@@ -876,8 +876,10 @@ const FrameWrapper: React.FC<{ content: React.ReactNode; mod: RModifier; env: Vi
   const alignment = ALIGNMENTS[isImplicitName(mod.args.find((a) => a.label === "alignment")?.value) ?? "center"] ?? ALIGNMENTS.center;
 
   // Text, labels and shapes keep their intrinsic box (SwiftUI centers them in
-  // the wider frame); controls and containers stretch to fill it.
-  const stretch = stretchesToFrame(node.type);
+  // the wider frame); controls and containers stretch to fill it. A flat
+  // container (Group, GridRow, …) has no box of its own, so the decision falls
+  // to the children that actually render.
+  const stretch = frameStretches(node);
   const stretchX = stretch && layout.fillX;
   const stretchY = stretch && layout.fillY;
 
@@ -1249,10 +1251,11 @@ const ButtonBlock: React.FC<{ node: RNode; env: ViewEnv }> = ({ node, env }) => 
   );
 
   // A greedy label — `.frame(maxWidth: .infinity)` on the label's content, or a
-  // Spacer inside it — makes the button greedy too. That is the idiomatic
-  // SwiftUI recipe for a full-width button, so the button must claim the width
-  // instead of shrinking around the label.
-  const greedyLabel = node.children.some(viewWantsFullWidth);
+  // horizontal Spacer inside it — makes the button greedy too. That is the
+  // idiomatic SwiftUI recipe for a full-width button, so the button must claim
+  // the width instead of shrinking around the label. The label span is a row,
+  // so only children that flex horizontally count.
+  const greedyLabel = node.children.some((child) => viewWantsFullWidth(child, "horizontal"));
   const greedyClasses = greedyLabel ? fullWidthClasses(env.axis) : [];
   const greedyStyle: React.CSSProperties = greedyLabel
     ? env.axis === "horizontal"
@@ -1426,7 +1429,7 @@ const StackBlock: React.FC<{ node: RNode; env: ViewEnv; direction: "column" | "r
   // child with `.frame(maxWidth: .infinity)` consumes the offered width, exactly
   // like SwiftUI's layout proposal. The same applies vertically to a column
   // that contains a greedy child.
-  const greedyRow = direction === "row" && node.children.some(viewWantsFullWidth);
+  const greedyRow = direction === "row" && node.children.some((child) => viewWantsFullWidth(child, "horizontal"));
   const greedyColumn = direction === "column" && node.children.some(isGreedyVertical);
 
   return (
